@@ -13,22 +13,11 @@ let myCallsign = '';
 let myDept = '';
 let selectedDept = '';
 let isTalking = false;
-let isChannelBusy = false;
 
 // Audio TX
 let audioContext = null;
 let mediaStream = null;
 let mediaRecorder = null;
-
-// Audio RX — MediaSource streaming
-let rxAudio = null;
-let mediaSource = null;
-let sourceBuffer = null;
-let sourceBufferReady = false;
-let rxMimeType = '';
-const rxQueue = [];         // pending ArrayBuffers to append
-let transmissionEnded = false;  // flag: sender released PTT
-let rxDrainTimer = null;        // timer to clear RX mode after queue drains
 
 // Beep tones
 const BEEP_TX_START = { freq: 880,  dur: 60,  vol: 0.3 };
@@ -37,20 +26,19 @@ const BEEP_RX_START = { freq: 1200, dur: 50,  vol: 0.2 };
 const BEEP_BUSY     = { freq: 440,  dur: 200, vol: 0.2 };
 
 // ─── DOM Refs ─────────────────────────────────────────────────────────────────
-const loginScreen   = document.getElementById('login-screen');
-const radioScreen   = document.getElementById('radio-screen');
-const callsignInput = document.getElementById('callsign-input');
-const connectBtn    = document.getElementById('connect-btn');
-const loginError    = document.getElementById('login-error');
-const deptBtns      = document.querySelectorAll('.dept-btn');
-const pttBtn        = document.getElementById('ptt-btn');
-const logoutBtn     = document.getElementById('logout-btn');
+const loginScreen    = document.getElementById('login-screen');
+const radioScreen    = document.getElementById('radio-screen');
+const callsignInput  = document.getElementById('callsign-input');
+const connectBtn     = document.getElementById('connect-btn');
+const loginError     = document.getElementById('login-error');
+const deptBtns       = document.querySelectorAll('.dept-btn');
+const pttBtn         = document.getElementById('ptt-btn');
+const logoutBtn      = document.getElementById('logout-btn');
 
 const deptBadge       = document.getElementById('dept-badge');
 const callsignDisplay = document.getElementById('callsign-display');
 const freqDisplay     = document.getElementById('freq-display');
 const deptNameDisplay = document.getElementById('dept-name-display');
-const txIndicator     = document.getElementById('tx-indicator');
 const txText          = document.getElementById('tx-text');
 const txArea          = document.querySelector('.tx-area');
 const userList        = document.getElementById('user-list');
@@ -73,7 +61,9 @@ function updateConnectBtn() {
 }
 
 connectBtn.addEventListener('click', connect);
-callsignInput.addEventListener('keydown', e => { if (e.key === 'Enter' && !connectBtn.disabled) connect(); });
+callsignInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !connectBtn.disabled) connect();
+});
 
 function connect() {
   const callsign = callsignInput.value.trim().toUpperCase();
@@ -82,13 +72,9 @@ function connect() {
   myCallsign = callsign;
   myDept = selectedDept;
   socket = io();
-  socket.on('connect', () => {
-    socket.emit('join', { callsign: myCallsign, department: myDept });
-  });
+  socket.on('connect', () => socket.emit('join', { callsign: myCallsign, department: myDept }));
   socket.on('joined', () => switchToRadio());
-  socket.on('connect_error', () => {
-    loginError.textContent = 'Cannot connect to server. Is it running?';
-  });
+  socket.on('connect_error', () => { loginError.textContent = 'Cannot connect to server.'; });
   setupSocketHandlers();
 }
 
@@ -102,7 +88,6 @@ function switchToRadio() {
   freqDisplay.textContent = cfg.freq;
   deptNameDisplay.textContent = cfg.name;
   addLog('sys', `Connected to ${cfg.name} (${cfg.freq})`);
-  initRxPlayer();
 }
 
 // ─── Socket handlers ──────────────────────────────────────────────────────────
@@ -110,27 +95,21 @@ function setupSocketHandlers() {
 
   socket.on('channel_update', ({ count, users }) => {
     userCount.textContent = count;
-    if (users && users.length > 0) {
-      userList.innerHTML = users.map(u => `<span class="user-tag">${u}</span>`).join('');
-    } else {
-      userList.innerHTML = '<span class="no-users">No units connected</span>';
-    }
+    userList.innerHTML = users && users.length > 0
+      ? users.map(u => `<span class="user-tag">${u}</span>`).join('')
+      : '<span class="no-users">No units connected</span>';
   });
 
   socket.on('transmission_start', ({ transmitter, socketId }) => {
     if (socketId === socket.id) return;
-    transmissionEnded = false;
-    if (rxDrainTimer) { clearTimeout(rxDrainTimer); rxDrainTimer = null; }
     setRxMode(true, transmitter);
     playBeep(BEEP_RX_START);
     addLog('rx', `${transmitter} — TRANSMITTING`);
   });
 
-  // Sender released PTT — but we DON'T clear RX mode yet.
-  // We set a flag and wait for the audio queue to drain first.
-  socket.on('transmission_end', () => {
-    transmissionEnded = true;
-    scheduleRxClear();
+  socket.on('transmission_end', ({ department }) => {
+    // RX mode will be cleared after playback finishes (inside voice_playback handler)
+    // Only clear immediately if we never got audio
   });
 
   socket.on('channel_busy', ({ transmitter }) => {
@@ -140,9 +119,12 @@ function setupSocketHandlers() {
     addLog('sys', `CHANNEL BUSY — ${transmitter} is transmitting`);
   });
 
-  socket.on('voice_chunk', ({ chunk }) => {
-    // chunk is an ArrayBuffer sent as binary over socket.io
-    playIncomingAudio(chunk);
+  // Full complete audio arrives after sender releases PTT
+  socket.on('voice_playback', ({ audio, transmitter }) => {
+    addLog('rx', `${transmitter} — PLAYING BACK`);
+    playCompleteAudio(audio).then(() => {
+      setRxMode(false);
+    });
   });
 
   socket.on('disconnect', () => {
@@ -150,22 +132,6 @@ function setupSocketHandlers() {
     setRxMode(false);
     setTxMode(false);
   });
-}
-
-// Called whenever transmission_end arrives or the sourceBuffer finishes an append.
-// Clears RX mode only once: the transmission has ended AND the queue is empty.
-function scheduleRxClear() {
-  if (!transmissionEnded) return;
-  if (rxQueue.length > 0) return; // still draining
-  if (sourceBuffer && sourceBuffer.updating) return; // still playing
-
-  // Small grace period so the last audio chunk has time to finish playing
-  if (rxDrainTimer) clearTimeout(rxDrainTimer);
-  rxDrainTimer = setTimeout(() => {
-    setRxMode(false);
-    transmissionEnded = false;
-    setTimeout(initRxPlayer, 100); // reset player for next transmission
-  }, 600);
 }
 
 // ─── PTT ──────────────────────────────────────────────────────────────────────
@@ -185,6 +151,7 @@ document.addEventListener('keyup', e => { if (e.code === 'Space') stopPTT(); });
 async function startPTT() {
   if (isTalking || !socket) return;
   socket.emit('ptt_start', { department: myDept });
+
   try {
     if (!mediaStream) {
       mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
@@ -198,18 +165,19 @@ async function startPTT() {
     playBeep(BEEP_TX_START);
     addLog('tx', `${myCallsign} — TRANSMITTING`);
 
-    mediaRecorder = new MediaRecorder(mediaStream, { mimeType: getBestMimeType() });
+    const mimeType = getBestMimeType();
+    mediaRecorder = new MediaRecorder(mediaStream, { mimeType });
 
     mediaRecorder.ondataavailable = e => {
       if (e.data.size > 0) {
-        // Send even after PTT released (mediaRecorder.stop() flushes final chunk)
         e.data.arrayBuffer().then(buf => {
           if (socket) socket.emit('voice_chunk', { department: myDept, chunk: buf });
         });
       }
     };
 
-    mediaRecorder.start(200); // 200ms chunks
+    // Collect in 200ms chunks while talking
+    mediaRecorder.start(200);
   } catch (err) {
     console.error('Mic error:', err);
     addLog('sys', 'MIC ACCESS DENIED — Check browser permissions');
@@ -223,12 +191,16 @@ function stopPTT() {
   if (!isTalking) return;
   isTalking = false;
 
-  // stop() triggers one final ondataavailable with remaining audio, THEN stops
   if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    // onstop fires after the final ondataavailable — server gets every chunk
+    mediaRecorder.onstop = () => {
+      if (socket) socket.emit('ptt_stop', { department: myDept });
+    };
     mediaRecorder.stop();
+  } else {
+    if (socket) socket.emit('ptt_stop', { department: myDept });
   }
 
-  if (socket) socket.emit('ptt_stop', { department: myDept });
   pttBtn.classList.remove('active');
   setTxMode(false);
   playBeep(BEEP_TX_END);
@@ -257,77 +229,40 @@ function setRxMode(on, who = '') {
   }
 }
 
-// ─── Audio RX — MediaSource streaming ────────────────────────────────────────
+// ─── Audio ────────────────────────────────────────────────────────────────────
 function getBestMimeType() {
   const types = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/ogg'];
   for (const t of types) if (MediaRecorder.isTypeSupported(t)) return t;
   return '';
 }
 
-function initRxPlayer() {
-  if (rxAudio) { rxAudio.pause(); rxAudio.src = ''; }
-  rxMimeType = getBestMimeType();
-  sourceBufferReady = false;
-
-  if (!rxMimeType || !window.MediaSource || !MediaSource.isTypeSupported(rxMimeType)) {
-    rxAudio = null; return;
-  }
-
-  mediaSource = new MediaSource();
-  rxAudio = new Audio();
-  rxAudio.src = URL.createObjectURL(mediaSource);
-  rxAudio.autoplay = true;
-
-  mediaSource.addEventListener('sourceopen', () => {
+// Play a complete audio buffer (ArrayBuffer) from start to finish, returns a Promise
+async function playCompleteAudio(arrayBuf) {
+  return new Promise(async (resolve) => {
     try {
-      sourceBuffer = mediaSource.addSourceBuffer(rxMimeType);
-      sourceBuffer.mode = 'sequence';
-      sourceBufferReady = true;
-      flushRxQueue();
-      sourceBuffer.addEventListener('updateend', () => {
-        flushRxQueue();
-        scheduleRxClear(); // check if we can clear RX mode now
-      });
-    } catch(e) {
-      console.warn('SourceBuffer init failed:', e);
-      sourceBufferReady = false;
+      if (!audioContext) audioContext = new AudioContext();
+      if (audioContext.state === 'suspended') await audioContext.resume();
+
+      // arrayBuf arrives as a Node Buffer over socket — convert to ArrayBuffer
+      const buf = arrayBuf instanceof ArrayBuffer
+        ? arrayBuf
+        : arrayBuf.buffer
+          ? arrayBuf.buffer.slice(arrayBuf.byteOffset, arrayBuf.byteOffset + arrayBuf.byteLength)
+          : new Uint8Array(Object.values(arrayBuf)).buffer;
+
+      const decoded = await audioContext.decodeAudioData(buf);
+      const src = audioContext.createBufferSource();
+      src.buffer = decoded;
+      src.connect(audioContext.destination);
+      src.onended = resolve;
+      src.start();
+    } catch (e) {
+      console.warn('Audio decode error:', e);
+      resolve(); // don't hang even if decode fails
     }
   });
 }
 
-function flushRxQueue() {
-  if (!sourceBuffer || sourceBuffer.updating || rxQueue.length === 0) return;
-  const chunk = rxQueue.shift();
-  try {
-    sourceBuffer.appendBuffer(chunk);
-  } catch(e) {
-    console.warn('appendBuffer error:', e);
-  }
-}
-
-function playIncomingAudio(arrayBuf) {
-  if (!rxAudio || !sourceBufferReady || mediaSource.readyState !== 'open') {
-    playChunkFallback(arrayBuf);
-    return;
-  }
-  rxQueue.push(arrayBuf);
-  flushRxQueue();
-}
-
-async function playChunkFallback(arrayBuf) {
-  try {
-    if (!audioContext) audioContext = new AudioContext();
-    if (audioContext.state === 'suspended') await audioContext.resume();
-    const buffer = await audioContext.decodeAudioData(arrayBuf.slice(0));
-    const src = audioContext.createBufferSource();
-    src.buffer = buffer;
-    src.connect(audioContext.destination);
-    src.onended = scheduleRxClear;
-    src.start();
-  } catch(e) { /* incomplete chunk — ignore */ }
-}
-
-// ─── Beeps ────────────────────────────────────────────────────────────────────
 function playBeep({ freq, dur, vol }) {
   try {
     if (!audioContext) audioContext = new AudioContext();
