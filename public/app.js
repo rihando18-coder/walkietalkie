@@ -15,19 +15,20 @@ let selectedDept = '';
 let isTalking = false;
 let isChannelBusy = false;
 
-// Audio
+// Audio TX
 let audioContext = null;
 let mediaStream = null;
 let mediaRecorder = null;
-let audioChunks = [];
 
-// RX playback via MediaSource
+// Audio RX — MediaSource streaming
+let rxAudio = null;
 let mediaSource = null;
 let sourceBuffer = null;
-let rxAudio = null;
-let rxMimeType = '';
-const rxQueue = [];
 let sourceBufferReady = false;
+let rxMimeType = '';
+const rxQueue = [];         // pending ArrayBuffers to append
+let transmissionEnded = false;  // flag: sender released PTT
+let rxDrainTimer = null;        // timer to clear RX mode after queue drains
 
 // Beep tones
 const BEEP_TX_START = { freq: 880,  dur: 60,  vol: 0.3 };
@@ -45,16 +46,16 @@ const deptBtns      = document.querySelectorAll('.dept-btn');
 const pttBtn        = document.getElementById('ptt-btn');
 const logoutBtn     = document.getElementById('logout-btn');
 
-const deptBadge      = document.getElementById('dept-badge');
-const callsignDisplay= document.getElementById('callsign-display');
-const freqDisplay    = document.getElementById('freq-display');
-const deptNameDisplay= document.getElementById('dept-name-display');
-const txIndicator    = document.getElementById('tx-indicator');
-const txText         = document.getElementById('tx-text');
-const txArea         = document.querySelector('.tx-area');
-const userList       = document.getElementById('user-list');
-const userCount      = document.getElementById('user-count');
-const logEntries     = document.getElementById('log-entries');
+const deptBadge       = document.getElementById('dept-badge');
+const callsignDisplay = document.getElementById('callsign-display');
+const freqDisplay     = document.getElementById('freq-display');
+const deptNameDisplay = document.getElementById('dept-name-display');
+const txIndicator     = document.getElementById('tx-indicator');
+const txText          = document.getElementById('tx-text');
+const txArea          = document.querySelector('.tx-area');
+const userList        = document.getElementById('user-list');
+const userCount       = document.getElementById('user-count');
+const logEntries      = document.getElementById('log-entries');
 
 // ─── Login ────────────────────────────────────────────────────────────────────
 deptBtns.forEach(btn => {
@@ -78,38 +79,28 @@ function connect() {
   const callsign = callsignInput.value.trim().toUpperCase();
   if (!callsign || !selectedDept) return;
   loginError.textContent = '';
-
   myCallsign = callsign;
   myDept = selectedDept;
-
   socket = io();
-
   socket.on('connect', () => {
     socket.emit('join', { callsign: myCallsign, department: myDept });
   });
-
-  socket.on('joined', ({ user }) => {
-    switchToRadio();
-  });
-
+  socket.on('joined', () => switchToRadio());
   socket.on('connect_error', () => {
     loginError.textContent = 'Cannot connect to server. Is it running?';
   });
-
   setupSocketHandlers();
 }
 
 function switchToRadio() {
   loginScreen.classList.remove('active');
   radioScreen.classList.add('active');
-
   const cfg = DEPT_CONFIG[myDept];
   deptBadge.textContent = myDept;
   deptBadge.className = `dept-badge ${myDept}`;
   callsignDisplay.textContent = myCallsign;
   freqDisplay.textContent = cfg.freq;
   deptNameDisplay.textContent = cfg.name;
-
   addLog('sys', `Connected to ${cfg.name} (${cfg.freq})`);
   initRxPlayer();
 }
@@ -120,25 +111,26 @@ function setupSocketHandlers() {
   socket.on('channel_update', ({ count, users }) => {
     userCount.textContent = count;
     if (users && users.length > 0) {
-      userList.innerHTML = users
-        .map(u => `<span class="user-tag">${u}</span>`)
-        .join('');
+      userList.innerHTML = users.map(u => `<span class="user-tag">${u}</span>`).join('');
     } else {
       userList.innerHTML = '<span class="no-users">No units connected</span>';
     }
   });
 
   socket.on('transmission_start', ({ transmitter, socketId }) => {
-    if (socketId === socket.id) return; // Own TX handled separately
+    if (socketId === socket.id) return;
+    transmissionEnded = false;
+    if (rxDrainTimer) { clearTimeout(rxDrainTimer); rxDrainTimer = null; }
     setRxMode(true, transmitter);
     playBeep(BEEP_RX_START);
     addLog('rx', `${transmitter} — TRANSMITTING`);
   });
 
+  // Sender released PTT — but we DON'T clear RX mode yet.
+  // We set a flag and wait for the audio queue to drain first.
   socket.on('transmission_end', () => {
-    setRxMode(false);
-    // Reset MediaSource for next transmission
-    setTimeout(initRxPlayer, 300);
+    transmissionEnded = true;
+    scheduleRxClear();
   });
 
   socket.on('channel_busy', ({ transmitter }) => {
@@ -149,7 +141,7 @@ function setupSocketHandlers() {
   });
 
   socket.on('voice_chunk', ({ chunk }) => {
-    // chunk arrives as ArrayBuffer (Socket.IO binary)
+    // chunk is an ArrayBuffer sent as binary over socket.io
     playIncomingAudio(chunk);
   });
 
@@ -158,6 +150,22 @@ function setupSocketHandlers() {
     setRxMode(false);
     setTxMode(false);
   });
+}
+
+// Called whenever transmission_end arrives or the sourceBuffer finishes an append.
+// Clears RX mode only once: the transmission has ended AND the queue is empty.
+function scheduleRxClear() {
+  if (!transmissionEnded) return;
+  if (rxQueue.length > 0) return; // still draining
+  if (sourceBuffer && sourceBuffer.updating) return; // still playing
+
+  // Small grace period so the last audio chunk has time to finish playing
+  if (rxDrainTimer) clearTimeout(rxDrainTimer);
+  rxDrainTimer = setTimeout(() => {
+    setRxMode(false);
+    transmissionEnded = false;
+    setTimeout(initRxPlayer, 100); // reset player for next transmission
+  }, 600);
 }
 
 // ─── PTT ──────────────────────────────────────────────────────────────────────
@@ -169,19 +177,14 @@ pttBtn.addEventListener('touchend',   e => { e.preventDefault(); stopPTT(); });
 
 document.addEventListener('keydown', e => {
   if (e.code === 'Space' && !e.repeat && document.activeElement !== callsignInput) {
-    e.preventDefault();
-    startPTT();
+    e.preventDefault(); startPTT();
   }
 });
-document.addEventListener('keyup', e => {
-  if (e.code === 'Space') stopPTT();
-});
+document.addEventListener('keyup', e => { if (e.code === 'Space') stopPTT(); });
 
 async function startPTT() {
   if (isTalking || !socket) return;
-
   socket.emit('ptt_start', { department: myDept });
-
   try {
     if (!mediaStream) {
       mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
@@ -195,19 +198,18 @@ async function startPTT() {
     playBeep(BEEP_TX_START);
     addLog('tx', `${myCallsign} — TRANSMITTING`);
 
-    // Stream audio chunks to server
     mediaRecorder = new MediaRecorder(mediaStream, { mimeType: getBestMimeType() });
-    audioChunks = [];
 
     mediaRecorder.ondataavailable = e => {
-      if (e.data.size > 0 && isTalking) {
+      if (e.data.size > 0) {
+        // Send even after PTT released (mediaRecorder.stop() flushes final chunk)
         e.data.arrayBuffer().then(buf => {
-          socket.emit('voice_chunk', { department: myDept, chunk: buf });
+          if (socket) socket.emit('voice_chunk', { department: myDept, chunk: buf });
         });
       }
     };
 
-    mediaRecorder.start(200); // 200ms chunks — more stable
+    mediaRecorder.start(200); // 200ms chunks
   } catch (err) {
     console.error('Mic error:', err);
     addLog('sys', 'MIC ACCESS DENIED — Check browser permissions');
@@ -221,12 +223,12 @@ function stopPTT() {
   if (!isTalking) return;
   isTalking = false;
 
+  // stop() triggers one final ondataavailable with remaining audio, THEN stops
   if (mediaRecorder && mediaRecorder.state !== 'inactive') {
     mediaRecorder.stop();
   }
 
   if (socket) socket.emit('ptt_stop', { department: myDept });
-
   pttBtn.classList.remove('active');
   setTxMode(false);
   playBeep(BEEP_TX_END);
@@ -255,24 +257,20 @@ function setRxMode(on, who = '') {
   }
 }
 
-// ─── Audio ────────────────────────────────────────────────────────────────────
+// ─── Audio RX — MediaSource streaming ────────────────────────────────────────
 function getBestMimeType() {
   const types = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/ogg'];
-  for (const t of types) {
-    if (MediaRecorder.isTypeSupported(t)) return t;
-  }
+  for (const t of types) if (MediaRecorder.isTypeSupported(t)) return t;
   return '';
 }
 
 function initRxPlayer() {
-  // Tear down old player if exists
   if (rxAudio) { rxAudio.pause(); rxAudio.src = ''; }
-
   rxMimeType = getBestMimeType();
+  sourceBufferReady = false;
+
   if (!rxMimeType || !window.MediaSource || !MediaSource.isTypeSupported(rxMimeType)) {
-    // Fallback: play individual blobs (higher latency but works everywhere)
-    rxAudio = null;
-    return;
+    rxAudio = null; return;
   }
 
   mediaSource = new MediaSource();
@@ -286,7 +284,10 @@ function initRxPlayer() {
       sourceBuffer.mode = 'sequence';
       sourceBufferReady = true;
       flushRxQueue();
-      sourceBuffer.addEventListener('updateend', flushRxQueue);
+      sourceBuffer.addEventListener('updateend', () => {
+        flushRxQueue();
+        scheduleRxClear(); // check if we can clear RX mode now
+      });
     } catch(e) {
       console.warn('SourceBuffer init failed:', e);
       sourceBufferReady = false;
@@ -306,7 +307,6 @@ function flushRxQueue() {
 
 function playIncomingAudio(arrayBuf) {
   if (!rxAudio || !sourceBufferReady || mediaSource.readyState !== 'open') {
-    // Fallback: decode and play as individual blob
     playChunkFallback(arrayBuf);
     return;
   }
@@ -322,12 +322,12 @@ async function playChunkFallback(arrayBuf) {
     const src = audioContext.createBufferSource();
     src.buffer = buffer;
     src.connect(audioContext.destination);
+    src.onended = scheduleRxClear;
     src.start();
-  } catch(e) {
-    // Chunk may be incomplete — ignore silently
-  }
+  } catch(e) { /* incomplete chunk — ignore */ }
 }
 
+// ─── Beeps ────────────────────────────────────────────────────────────────────
 function playBeep({ freq, dur, vol }) {
   try {
     if (!audioContext) audioContext = new AudioContext();
@@ -353,8 +353,6 @@ function addLog(type, message) {
   entry.innerHTML = `<span class="log-time">${time}</span><span>${message}</span>`;
   logEntries.appendChild(entry);
   logEntries.scrollTop = logEntries.scrollHeight;
-
-  // Keep max 50 entries
   while (logEntries.children.length > 50) logEntries.removeChild(logEntries.firstChild);
 }
 
