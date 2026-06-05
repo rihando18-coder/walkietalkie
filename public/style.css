@@ -16,7 +16,6 @@
   --red-dim: rgba(255,68,68,0.15);
   --yellow: #ffcc00;
 
-  /* Dept colors */
   --police: #1a6bb5;
   --fire: #c0392b;
   --dot: #7d9b2a;
@@ -30,63 +29,65 @@ html, body {
   color: var(--text);
   font-family: 'Rajdhani', sans-serif;
   font-size: 15px;
-  overflow: hidden;
+  /* Allow scrolling on mobile */
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 /* ── SCREENS ── */
-.screen { display: none; width: 100%; height: 100vh; }
-.screen.active { display: flex; align-items: center; justify-content: center; }
+.screen { display: none; width: 100%; min-height: 100vh; }
+.screen.active { display: flex; align-items: flex-start; justify-content: center; padding: 16px; }
 
 /* ── LOGIN ── */
 .login-box {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 36px 32px;
-  width: 420px;
-  max-width: 95vw;
+  padding: 28px 20px;
+  width: 100%;
+  max-width: 420px;
+  margin: auto;
   box-shadow: 0 0 60px rgba(0,100,200,0.08), 0 0 0 1px rgba(255,255,255,0.03);
 }
 
-.logo-area {
-  text-align: center;
-  margin-bottom: 28px;
-}
-.logo-icon { font-size: 40px; margin-bottom: 8px; }
+.logo-area { text-align: center; margin-bottom: 24px; }
+.logo-icon { font-size: 36px; margin-bottom: 8px; }
 .logo-area h1 {
-  font-size: 26px;
+  font-size: 22px;
   font-weight: 700;
-  letter-spacing: 6px;
+  letter-spacing: 5px;
   color: var(--text-bright);
 }
 .subtitle {
   font-family: 'Share Tech Mono', monospace;
-  font-size: 11px;
+  font-size: 10px;
   letter-spacing: 3px;
   color: var(--text-dim);
   margin-top: 4px;
 }
 
-.form-group { margin-bottom: 20px; }
+.form-group { margin-bottom: 18px; }
 .form-group label {
   display: block;
-  font-size: 11px;
+  font-size: 10px;
   letter-spacing: 2px;
   color: var(--text-dim);
-  margin-bottom: 8px;
+  margin-bottom: 7px;
 }
 .form-group input {
   width: 100%;
   background: #0d1015;
   border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 10px 14px;
+  padding: 12px 14px;
   color: var(--text-bright);
   font-family: 'Share Tech Mono', monospace;
   font-size: 15px;
   letter-spacing: 2px;
   outline: none;
   transition: border-color 0.2s;
+  /* Prevent zoom on focus on iOS */
+  font-size: 16px;
 }
 .form-group input:focus { border-color: var(--accent); }
 .form-group input::placeholder { color: var(--text-dim); letter-spacing: 1px; }
@@ -102,7 +103,7 @@ html, body {
   background: #0d1015;
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 12px 10px;
+  padding: 12px 8px;
   color: var(--text);
   cursor: pointer;
   display: flex;
@@ -114,6 +115,9 @@ html, body {
   font-size: 12px;
   letter-spacing: 1.5px;
   transition: all 0.18s;
+  /* Larger tap target */
+  min-height: 72px;
+  -webkit-tap-highlight-color: transparent;
 }
 .dept-btn:hover { border-color: var(--border-glow); background: #131820; }
 .dept-btn.selected { border-color: var(--accent); background: var(--accent-dim); color: var(--accent); }
@@ -135,7 +139,7 @@ html, body {
 .connect-btn {
   width: 100%;
   margin-top: 8px;
-  padding: 14px;
+  padding: 16px;
   background: linear-gradient(135deg, #003366 0%, #005599 100%);
   border: 1px solid #0077bb;
   border-radius: 8px;
@@ -146,23 +150,35 @@ html, body {
   letter-spacing: 3px;
   cursor: pointer;
   transition: all 0.2s;
+  -webkit-tap-highlight-color: transparent;
+  /* Better tap target */
+  min-height: 52px;
 }
 .connect-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.connect-btn:not(:disabled):hover { background: linear-gradient(135deg, #004488 0%, #0077cc 100%); box-shadow: 0 0 20px rgba(0,119,187,0.3); }
+.connect-btn:not(:disabled):hover,
+.connect-btn:not(:disabled):active {
+  background: linear-gradient(135deg, #004488 0%, #0077cc 100%);
+  box-shadow: 0 0 20px rgba(0,119,187,0.3);
+}
 
 .error-msg { color: var(--red); font-size: 12px; text-align: center; margin-top: 10px; min-height: 16px; }
 
 /* ── RADIO SCREEN ── */
-#radio-screen { background: var(--bg); padding: 16px; }
+#radio-screen {
+  background: var(--bg);
+  padding: 0;
+  align-items: flex-start;
+}
 
 .radio-container {
   width: 100%;
   max-width: 480px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  height: 100%;
-  max-height: 800px;
+  gap: 8px;
+  padding: 12px 12px 24px;
+  /* Let it scroll naturally, no fixed height */
+  min-height: 100vh;
 }
 
 /* Header */
@@ -173,7 +189,10 @@ html, body {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 10px 14px;
+  padding: 10px 12px;
+  position: sticky;
+  top: 12px;
+  z-index: 10;
 }
 .header-left { display: flex; align-items: center; gap: 8px; }
 .signal-bars { display: flex; align-items: flex-end; gap: 2px; height: 16px; }
@@ -182,17 +201,14 @@ html, body {
 .bar.b2 { width: 3px; height: 7px;  animation-delay: 0.1s; }
 .bar.b3 { width: 3px; height: 11px; animation-delay: 0.2s; }
 .bar.b4 { width: 3px; height: 15px; animation-delay: 0.3s; }
-@keyframes pulse-bar {
-  0%,100% { opacity: 1; }
-  50% { opacity: 0.4; }
-}
+@keyframes pulse-bar { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
 .status-text { font-family: 'Share Tech Mono', monospace; font-size: 11px; color: var(--green); letter-spacing: 1px; }
 
 .dept-badge {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
-  letter-spacing: 3px;
-  padding: 4px 12px;
+  letter-spacing: 2px;
+  padding: 4px 10px;
   border-radius: 20px;
   background: var(--accent-dim);
   border: 1px solid var(--accent);
@@ -205,16 +221,26 @@ html, body {
 .dept-badge.DISPATCH { background: rgba(122,58,181,0.2); border-color: var(--dispatch);color: #d090ff; }
 
 .header-right { display: flex; align-items: center; gap: 8px; }
-.callsign-tag { font-family: 'Share Tech Mono', monospace; font-size: 12px; color: var(--text-dim); }
-.icon-btn { background: none; border: 1px solid var(--border); border-radius: 6px; color: var(--text-dim); width: 28px; height: 28px; cursor: pointer; font-size: 12px; transition: all 0.2s; }
-.icon-btn:hover { border-color: var(--red); color: var(--red); }
+.callsign-tag { font-family: 'Share Tech Mono', monospace; font-size: 11px; color: var(--text-dim); }
+.icon-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-dim);
+  width: 32px; height: 32px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s;
+  -webkit-tap-highlight-color: transparent;
+}
+.icon-btn:hover, .icon-btn:active { border-color: var(--red); color: var(--red); }
 
 /* Frequency Display */
 .freq-display {
   background: #080b0e;
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 16px;
+  padding: 14px;
   text-align: center;
   position: relative;
   overflow: hidden;
@@ -229,26 +255,26 @@ html, body {
 .freq-label { font-family: 'Share Tech Mono', monospace; font-size: 10px; letter-spacing: 3px; color: var(--text-dim); }
 .freq-value {
   font-family: 'Share Tech Mono', monospace;
-  font-size: 42px;
+  font-size: 36px;
   color: var(--green);
   letter-spacing: 4px;
   text-shadow: 0 0 20px rgba(0,255,136,0.5);
   line-height: 1.1;
   margin: 4px 0;
 }
-#dept-name-display { font-size: 12px; letter-spacing: 2px; color: var(--text-dim); margin-top: 2px; }
+#dept-name-display { font-size: 11px; letter-spacing: 2px; color: var(--text-dim); margin-top: 2px; }
 
 /* TX Area */
 .tx-area {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 12px 16px;
+  padding: 12px 14px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  min-height: 54px;
+  min-height: 52px;
 }
 .tx-indicator { display: flex; align-items: center; gap: 8px; }
 .tx-dot {
@@ -263,7 +289,7 @@ html, body {
   font-size: 12px;
   letter-spacing: 2px;
   color: var(--text-dim);
-  min-width: 120px;
+  min-width: 100px;
 }
 .tx-area.transmitting .tx-dot { background: var(--red); box-shadow: 0 0 12px var(--red); }
 .tx-area.transmitting .tx-text { color: var(--red); }
@@ -284,10 +310,7 @@ html, body {
 }
 .tx-area.transmitting .wave-bar { background: var(--red); }
 .tx-area.receiving .wave-bar { background: var(--green); }
-@keyframes wave {
-  0%,100% { height: 4px; }
-  50% { height: 24px; }
-}
+@keyframes wave { 0%,100% { height: 4px; } 50% { height: 24px; } }
 
 /* Channel Info */
 .channel-info {
@@ -319,7 +342,7 @@ html, body {
   background: #0d1520;
   border: 1px solid var(--border-glow);
   border-radius: 4px;
-  padding: 3px 8px;
+  padding: 4px 8px;
   font-family: 'Share Tech Mono', monospace;
   font-size: 11px;
   color: var(--text);
@@ -332,11 +355,10 @@ html, body {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 12px 14px;
-  flex: 1;
-  overflow: hidden;
+  /* Fixed height with scroll instead of flex-grow */
+  height: 180px;
   display: flex;
   flex-direction: column;
-  min-height: 0;
 }
 .log-label { font-size: 10px; letter-spacing: 2px; color: var(--text-dim); margin-bottom: 8px; flex-shrink: 0; }
 .log-entries {
@@ -345,6 +367,7 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  -webkit-overflow-scrolling: touch;
 }
 .log-entries::-webkit-scrollbar { width: 4px; }
 .log-entries::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
@@ -368,14 +391,22 @@ html, body {
   flex-direction: column;
   align-items: center;
   gap: 10px;
-  padding-bottom: 8px;
-  flex-shrink: 0;
+  padding-bottom: env(safe-area-inset-bottom, 12px);
+  /* Stick to bottom on mobile */
+  position: sticky;
+  bottom: 0;
+  background: var(--bg);
+  padding-top: 10px;
+  margin: 0 -12px;
+  padding-left: 12px;
+  padding-right: 12px;
+  border-top: 1px solid var(--border);
 }
 .ptt-hint { font-size: 11px; letter-spacing: 1px; color: var(--text-dim); }
 
 .ptt-btn {
   width: 100%;
-  padding: 20px;
+  padding: 22px 20px;
   background: linear-gradient(135deg, #0d1a2a 0%, #102030 100%);
   border: 2px solid #1a3a5a;
   border-radius: 12px;
@@ -393,6 +424,9 @@ html, body {
   user-select: none;
   -webkit-user-select: none;
   touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+  /* Bigger tap target on mobile */
+  min-height: 72px;
 }
 .ptt-btn:active,
 .ptt-btn.active {
@@ -412,3 +446,54 @@ html, body {
   50% { background: rgba(255,200,0,0.1); }
 }
 .ptt-icon { font-size: 24px; }
+
+/* ── MOBILE RESPONSIVE ── */
+@media (max-width: 480px) {
+  .screen.active { padding: 10px; }
+
+  .radio-container {
+    padding: 10px 10px 0;
+    gap: 8px;
+    min-height: 100vh;
+  }
+
+  .radio-header {
+    padding: 8px 10px;
+    top: 10px;
+  }
+
+  .freq-value { font-size: 30px; }
+
+  .dept-grid { gap: 6px; }
+  .dept-btn { min-height: 68px; padding: 10px 6px; }
+
+  .login-box { padding: 24px 16px; }
+  .logo-area h1 { font-size: 20px; letter-spacing: 4px; }
+
+  .activity-log { height: 150px; }
+
+  .ptt-btn {
+    font-size: 18px;
+    min-height: 68px;
+    letter-spacing: 3px;
+  }
+
+  .callsign-tag { display: none; }
+}
+
+/* ── VERY SMALL SCREENS (iPhone SE etc) ── */
+@media (max-width: 360px) {
+  .freq-value { font-size: 26px; }
+  .logo-area h1 { font-size: 18px; }
+  .dept-btn { font-size: 11px; min-height: 62px; }
+  .ptt-btn { font-size: 16px; }
+}
+
+/* ── LANDSCAPE MOBILE ── */
+@media (max-height: 500px) and (orientation: landscape) {
+  .freq-display { padding: 8px; }
+  .freq-value { font-size: 24px; margin: 2px 0; }
+  .activity-log { height: 100px; }
+  .ptt-btn { min-height: 56px; padding: 14px 20px; }
+  .radio-header { position: relative; top: 0; }
+}
