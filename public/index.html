@@ -14,6 +14,22 @@
 </head>
 <body>
 
+<!-- NOTIFICATION CONTAINER (always on top) -->
+<div id="notif-container"></div>
+
+<!-- TOW MODAL -->
+<div id="tow-modal" class="modal-overlay">
+  <div class="modal-box">
+    <div class="modal-title">🚗 REQUEST TOW TRUCK</div>
+    <div class="modal-desc">Enter location — all departments will be notified</div>
+    <input id="tow-location" type="text" placeholder="e.g. Main St & 1st Ave" autocomplete="off">
+    <div class="modal-actions">
+      <button id="tow-cancel-btn" class="modal-btn cancel">CANCEL</button>
+      <button id="tow-confirm-btn" class="modal-btn confirm">SEND REQUEST</button>
+    </div>
+  </div>
+</div>
+
 <!-- LOGIN SCREEN -->
 <div id="login-screen" class="screen active">
   <div class="login-box">
@@ -24,36 +40,17 @@
     </div>
     <div class="form-group">
       <label>CALLSIGN / BADGE</label>
-      <input type="text" id="callsign-input" placeholder="e.g. OFFICER-42" maxlength="20" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false">
+      <input type="text" id="callsign-input" placeholder="e.g. OFFICER-42" maxlength="20"
+        autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false">
     </div>
     <div class="form-group">
       <label>DEPARTMENT</label>
       <div class="dept-grid" id="dept-select">
-        <button class="dept-btn" data-dept="POLICE">
-          <span class="dept-icon">🚔</span>
-          <span>POLICE</span>
-          <span class="dept-freq">CH-1</span>
-        </button>
-        <button class="dept-btn" data-dept="FIRE">
-          <span class="dept-icon">🚒</span>
-          <span>FIRE DEPT</span>
-          <span class="dept-freq">CH-2</span>
-        </button>
-        <button class="dept-btn" data-dept="DOT">
-          <span class="dept-icon">🚧</span>
-          <span>D.O.T</span>
-          <span class="dept-freq">CH-3</span>
-        </button>
-        <button class="dept-btn" data-dept="JMPD">
-          <span class="dept-icon">🛡️</span>
-          <span>JMPD</span>
-          <span class="dept-freq">CH-4</span>
-        </button>
-        <button class="dept-btn dept-btn-wide" data-dept="DISPATCH">
-          <span class="dept-icon">🎙️</span>
-          <span>DISPATCH</span>
-          <span class="dept-freq">CH-5</span>
-        </button>
+        <button class="dept-btn" data-dept="POLICE"><span class="dept-icon">🚔</span><span>POLICE</span><span class="dept-freq">CH-1</span></button>
+        <button class="dept-btn" data-dept="FIRE"><span class="dept-icon">🚒</span><span>FIRE DEPT</span><span class="dept-freq">CH-2</span></button>
+        <button class="dept-btn" data-dept="DOT"><span class="dept-icon">🚧</span><span>D.O.T</span><span class="dept-freq">CH-3</span></button>
+        <button class="dept-btn" data-dept="JMPD"><span class="dept-icon">🛡️</span><span>JMPD</span><span class="dept-freq">CH-4</span></button>
+        <button class="dept-btn dept-btn-wide" data-dept="DISPATCH"><span class="dept-icon">🎙️</span><span>DISPATCH</span><span class="dept-freq">CH-5</span></button>
       </div>
     </div>
     <button class="connect-btn" id="connect-btn" disabled>CONNECT TO RADIO</button>
@@ -69,12 +66,10 @@
     <div class="radio-header">
       <div class="header-left">
         <div class="signal-bars">
-          <span class="bar b1"></span>
-          <span class="bar b2"></span>
-          <span class="bar b3"></span>
-          <span class="bar b4"></span>
+          <span class="bar b1"></span><span class="bar b2"></span>
+          <span class="bar b3"></span><span class="bar b4"></span>
         </div>
-        <span id="connection-status" class="status-text">CONNECTED</span>
+        <span class="status-text">CONNECTED</span>
       </div>
       <div class="header-center">
         <div class="dept-badge" id="dept-badge">POLICE</div>
@@ -85,52 +80,86 @@
       </div>
     </div>
 
-    <!-- Frequency Display -->
-    <div class="freq-display">
-      <div class="freq-label">CHANNEL</div>
-      <div class="freq-value" id="freq-display">CH-1</div>
-      <div class="freq-label" id="dept-name-display">POLICE DEPARTMENT</div>
+    <!-- Tabs -->
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="radio">📻 RADIO</button>
+      <button class="tab-btn" data-tab="calls">📞 CALLS</button>
+      <button class="tab-btn" data-tab="players">👥 UNITS</button>
+      <button class="tab-btn" data-tab="settings">⚙️ SETUP</button>
     </div>
 
-    <!-- Transmission Status -->
-    <div class="tx-area">
-      <div class="tx-indicator" id="tx-indicator">
-        <span class="tx-dot"></span>
-        <span class="tx-text" id="tx-text">STANDBY</span>
+    <!-- TAB: RADIO -->
+    <div id="tab-radio" class="tab-panel active">
+
+      <!-- Frequency Display -->
+      <div class="freq-display">
+        <div class="freq-label">CHANNEL</div>
+        <div class="freq-value" id="freq-display">CH-1</div>
+        <div class="freq-label" id="dept-name-display">POLICE DEPARTMENT</div>
       </div>
-      <div class="waveform" id="waveform">
-        <div class="wave-bar" style="--i:0"></div>
-        <div class="wave-bar" style="--i:1"></div>
-        <div class="wave-bar" style="--i:2"></div>
-        <div class="wave-bar" style="--i:3"></div>
-        <div class="wave-bar" style="--i:4"></div>
-        <div class="wave-bar" style="--i:5"></div>
-        <div class="wave-bar" style="--i:6"></div>
-        <div class="wave-bar" style="--i:7"></div>
+
+      <!-- TX Status -->
+      <div class="tx-area">
+        <div class="tx-indicator">
+          <span class="tx-dot"></span>
+          <span class="tx-text" id="tx-text">STANDBY</span>
+        </div>
+        <div class="waveform">
+          <div class="wave-bar" style="--i:0"></div><div class="wave-bar" style="--i:1"></div>
+          <div class="wave-bar" style="--i:2"></div><div class="wave-bar" style="--i:3"></div>
+          <div class="wave-bar" style="--i:4"></div><div class="wave-bar" style="--i:5"></div>
+          <div class="wave-bar" style="--i:6"></div><div class="wave-bar" style="--i:7"></div>
+        </div>
+      </div>
+
+      <!-- Units on channel -->
+      <div class="channel-info">
+        <div class="channel-label">UNITS ON CHANNEL <span id="user-count" class="count-badge">0</span></div>
+        <div class="user-list" id="user-list"><span class="no-users">No units connected</span></div>
+      </div>
+
+      <!-- Activity Log -->
+      <div class="activity-log">
+        <div class="log-label">ACTIVITY LOG</div>
+        <div class="log-entries" id="log-entries"></div>
+      </div>
+
+    </div><!-- /tab-radio -->
+
+    <!-- TAB: CALLS -->
+    <div id="tab-calls" class="tab-panel">
+      <div class="erlc-section-label">LIVE CALLS <span id="erlc-status" class="erlc-status">● NOT CONFIGURED</span></div>
+      <div id="erlc-call-list" class="erlc-list">
+        <div class="erlc-empty">Configure ERLC API key in Setup tab</div>
       </div>
     </div>
 
-    <!-- Users on Channel -->
-    <div class="channel-info">
-      <div class="channel-label">UNITS ON CHANNEL <span id="user-count" class="count-badge">0</span></div>
-      <div class="user-list" id="user-list">
-        <span class="no-users">No units connected</span>
+    <!-- TAB: PLAYERS -->
+    <div id="tab-players" class="tab-panel">
+      <div class="erlc-section-label">ONLINE UNITS</div>
+      <div id="erlc-player-list" class="erlc-list">
+        <div class="erlc-empty">Configure ERLC API key in Setup tab</div>
       </div>
     </div>
 
-    <!-- Activity Log -->
-    <div class="activity-log">
-      <div class="log-label">ACTIVITY LOG</div>
-      <div class="log-entries" id="log-entries"></div>
+    <!-- TAB: SETTINGS -->
+    <div id="tab-settings" class="tab-panel">
+      <div class="settings-section">
+        <div class="settings-label">ERLC PRIVATE SERVER API KEY</div>
+        <div class="settings-desc">Enter your server key to enable live calls and player tracking</div>
+        <input id="erlc-key-input" type="password" placeholder="Paste API key here" autocomplete="off">
+        <button id="erlc-save-btn" class="settings-btn">SAVE</button>
+      </div>
     </div>
 
-    <!-- PTT Button -->
+    <!-- PTT + Tow (always visible at bottom) -->
     <div class="ptt-area">
-      <div class="ptt-hint" id="ptt-hint">Hold to transmit — Space bar or button</div>
+      <div class="ptt-hint">Hold to transmit — Space bar or button</div>
       <button class="ptt-btn" id="ptt-btn">
         <span class="ptt-icon">🎙️</span>
         <span class="ptt-label">PUSH TO TALK</span>
       </button>
+      <button class="tow-btn" id="tow-btn">🚗 REQUEST TOW TRUCK</button>
     </div>
 
   </div>
