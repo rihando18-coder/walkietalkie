@@ -19,6 +19,11 @@ let audioContext = null;
 let mediaStream = null;
 let mediaRecorder = null;
 
+// Shared audio element for RX playback — reusing one element is key on iOS
+const rxAudio = new Audio();
+rxAudio.autoplay = true;
+rxAudio.setAttribute('playsinline', '');
+
 // Beep tones
 const BEEP_TX_START = { freq: 880,  dur: 60,  vol: 0.3 };
 const BEEP_TX_END   = { freq: 660,  dur: 80,  vol: 0.25 };
@@ -71,11 +76,28 @@ function connect() {
   loginError.textContent = '';
   myCallsign = callsign;
   myDept = selectedDept;
+
+  // Unlock audio on iOS — MUST happen inside a user gesture (the connect button tap)
+  unlockAudio();
+
   socket = io();
   socket.on('connect', () => socket.emit('join', { callsign: myCallsign, department: myDept }));
   socket.on('joined', () => switchToRadio());
   socket.on('connect_error', () => { loginError.textContent = 'Cannot connect to server.'; });
   setupSocketHandlers();
+}
+
+// iOS requires a user-gesture-triggered play() to unlock the audio element
+function unlockAudio() {
+  rxAudio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+  rxAudio.play().catch(() => {});
+
+  if (!audioContext) {
+    audioContext = new AudioContext();
+  }
+  if (audioContext.state === 'suspended') {
+    audioContext.resume().catch(() => {});
+  }
 }
 
 function switchToRadio() {
@@ -107,9 +129,8 @@ function setupSocketHandlers() {
     addLog('rx', `${transmitter} — TRANSMITTING`);
   });
 
-  socket.on('transmission_end', ({ department }) => {
-    // RX mode will be cleared after playback finishes (inside voice_playback handler)
-    // Only clear immediately if we never got audio
+  socket.on('transmission_end', () => {
+    // Will be cleared after voice_playback finishes
   });
 
   socket.on('channel_busy', ({ transmitter }) => {
@@ -119,10 +140,10 @@ function setupSocketHandlers() {
     addLog('sys', `CHANNEL BUSY — ${transmitter} is transmitting`);
   });
 
-  // Full complete audio arrives after sender releases PTT
+  // Complete audio arrives after PTT release — play it all at once
   socket.on('voice_playback', ({ audio, transmitter }) => {
-    addLog('rx', `${transmitter} — PLAYING BACK`);
-    playCompleteAudio(audio).then(() => {
+    addLog('rx', `${transmitter} — playing`);
+    playAudioBlob(audio).then(() => {
       setRxMode(false);
     });
   });
@@ -176,7 +197,6 @@ async function startPTT() {
       }
     };
 
-    // Collect in 200ms chunks while talking
     mediaRecorder.start(200);
   } catch (err) {
     console.error('Mic error:', err);
@@ -192,7 +212,6 @@ function stopPTT() {
   isTalking = false;
 
   if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-    // onstop fires after the final ondataavailable — server gets every chunk
     mediaRecorder.onstop = () => {
       if (socket) socket.emit('ptt_stop', { department: myDept });
     };
@@ -236,29 +255,53 @@ function getBestMimeType() {
   return '';
 }
 
-// Play a complete audio buffer (ArrayBuffer) from start to finish, returns a Promise
-async function playCompleteAudio(arrayBuf) {
-  return new Promise(async (resolve) => {
+// Convert incoming data (Node Buffer / ArrayBuffer / plain object) to a Blob and play it
+function playAudioBlob(data) {
+  return new Promise((resolve) => {
     try {
-      if (!audioContext) audioContext = new AudioContext();
-      if (audioContext.state === 'suspended') await audioContext.resume();
+      let uint8;
+      if (data instanceof ArrayBuffer) {
+        uint8 = new Uint8Array(data);
+      } else if (data && data.buffer) {
+        // Already a typed array
+        uint8 = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+      } else if (data && typeof data === 'object') {
+        // Socket.IO sometimes delivers Node Buffers as plain objects with numeric keys
+        uint8 = new Uint8Array(Object.values(data));
+      } else {
+        resolve(); return;
+      }
 
-      // arrayBuf arrives as a Node Buffer over socket — convert to ArrayBuffer
-      const buf = arrayBuf instanceof ArrayBuffer
-        ? arrayBuf
-        : arrayBuf.buffer
-          ? arrayBuf.buffer.slice(arrayBuf.byteOffset, arrayBuf.byteOffset + arrayBuf.byteLength)
-          : new Uint8Array(Object.values(arrayBuf)).buffer;
+      // Detect mime type from the first bytes (webm starts with 0x1A45DFA3)
+      const mimeType = (uint8[0] === 0x1A && uint8[1] === 0x45) ? 'audio/webm' : 'audio/ogg';
+      const blob = new Blob([uint8], { type: mimeType });
+      const url = URL.createObjectURL(blob);
 
-      const decoded = await audioContext.decodeAudioData(buf);
-      const src = audioContext.createBufferSource();
-      src.buffer = decoded;
-      src.connect(audioContext.destination);
-      src.onended = resolve;
-      src.start();
+      // Revoke old URL if any
+      if (rxAudio.src && rxAudio.src.startsWith('blob:')) {
+        URL.revokeObjectURL(rxAudio.src);
+      }
+
+      rxAudio.src = url;
+      rxAudio.onended = () => {
+        URL.revokeObjectURL(url);
+        resolve();
+      };
+      rxAudio.onerror = () => {
+        URL.revokeObjectURL(url);
+        resolve();
+      };
+
+      const playPromise = rxAudio.play();
+      if (playPromise) {
+        playPromise.catch(err => {
+          console.warn('Audio play failed:', err);
+          resolve();
+        });
+      }
     } catch (e) {
-      console.warn('Audio decode error:', e);
-      resolve(); // don't hang even if decode fails
+      console.warn('playAudioBlob error:', e);
+      resolve();
     }
   });
 }
@@ -266,6 +309,7 @@ async function playCompleteAudio(arrayBuf) {
 function playBeep({ freq, dur, vol }) {
   try {
     if (!audioContext) audioContext = new AudioContext();
+    if (audioContext.state === 'suspended') audioContext.resume();
     const osc = audioContext.createOscillator();
     const gain = audioContext.createGain();
     osc.connect(gain);
